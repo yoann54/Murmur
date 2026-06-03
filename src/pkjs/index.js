@@ -23,6 +23,7 @@ var config = require('./config');
 var net = require('./net');
 var Conversation = require('./chat');
 var splitUtf8 = require('./chunk').splitUtf8;
+var formatForWatch = require('./markdown').formatForWatch;
 var buildConfigPage = require('./config_page');
 
 var STATUS_IDLE = 0;
@@ -54,7 +55,8 @@ function sendError(message) {
 }
 
 function sendResponse(text) {
-  var chunks = splitUtf8(String(text), CHUNK_BYTES);
+  // Light Markdown formatting for the watch (history keeps the raw text).
+  var chunks = splitUtf8(formatForWatch(text), CHUNK_BYTES);
   var total = chunks.length;
 
   function sendChunk(index, attempt) {

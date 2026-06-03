@@ -237,4 +237,33 @@ test('embedded current-config JSON is valid and round-trips', function () {
   assert.ok(Array.isArray(d.list) && d.list.length === providers.ids().length);
 });
 
+console.log('markdown: light formatting for watch display');
+
+var formatForWatch = require('../src/pkjs/markdown').formatForWatch;
+
+test('headings become UPPERCASE so titles stand out', function () {
+  assert.strictEqual(formatForWatch('# Title'), 'TITLE');
+  assert.strictEqual(formatForWatch('### Petit titre'), 'PETIT TITRE');
+});
+
+test('bullets become a real bullet point', function () {
+  assert.strictEqual(formatForWatch('* item one\n- item two'), '• item one\n• item two');
+});
+
+test('unwraps bold/italic/code/links to plain text', function () {
+  assert.strictEqual(formatForWatch('**bold** and *italic*'), 'bold and italic');
+  assert.strictEqual(formatForWatch('use `code` here'), 'use code here');
+  assert.strictEqual(formatForWatch('see [the docs](http://x.com)'), 'see the docs');
+  assert.strictEqual(formatForWatch('> quoted'), 'quoted');
+});
+
+test('drops fenced code markers but keeps the code text', function () {
+  assert.strictEqual(formatForWatch('```js\nvar x = 1;\n```'), 'var x = 1;\n');
+});
+
+test('leaves ordinary prose alone (no over-stripping)', function () {
+  assert.strictEqual(formatForWatch('Use 5 * 3 = 15 and snake_case names.'), 'Use 5 * 3 = 15 and snake_case names.');
+  assert.strictEqual(formatForWatch('Plain answer, no markdown.'), 'Plain answer, no markdown.');
+});
+
 console.log('\nAll ' + passed + ' tests passed.');
