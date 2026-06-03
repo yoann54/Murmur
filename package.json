@@ -1,0 +1,45 @@
+{
+  "name": "Murmur",
+  "author": "yoann piconcely",
+  "version": "1.0.2",
+  "keywords": [
+    "pebble-app"
+  ],
+  "private": true,
+  "pebble": {
+    "displayName": "Murmur",
+    "uuid": "65dee687-fbc9-4bfd-aacb-8e71f0424f74",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "emery",
+      "flint",
+      "gabbro"
+    ],
+    "watchapp": {
+      "watchface": false
+    },
+    "capabilities": [
+      "configurable"
+    ],
+    "messageKeys": [
+      "transcript",
+      "command",
+      "status",
+      "response",
+      "chunkIndex",
+      "chunkTotal",
+      "error"
+    ],
+    "resources": {
+      "media": [
+        {
+          "type": "png",
+          "name": "IMAGE_MENU_ICON",
+          "file": "images/menu-icon-25.png",
+          "menuIcon": true
+        }
+      ]
+    }
+  }
+}

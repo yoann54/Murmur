@@ -1,0 +1,18 @@
+# Pebble build output
+build/
+*.pbw
+.lock-waf*
+
+# pebble publish auto-capture output
+/screenshots/
+
+# Node (no runtime deps; Clay is not used)
+node_modules/
+package-lock.json
+
+# Python / tooling
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
