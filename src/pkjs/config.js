@@ -38,7 +38,17 @@ function defaults() {
     temperature: undefined,
     maxTokens: undefined,
     historyTurns: 6,
-    timeoutMs: 30000
+    timeoutMs: 30000,
+    // Read-answers-aloud (TTS). Independent of the chat provider.
+    tts: {
+      enabled: false,
+      provider: 'openai_tts',
+      key: '',
+      model: '',
+      voice: '',
+      baseUrl: '',
+      maxChars: 600
+    }
   };
 }
 

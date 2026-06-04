@@ -14,6 +14,7 @@
  */
 
 var providers = require('./providers');
+var tts = require('./tts');
 
 // Client-side logic, injected into the page. Kept as a string so it ships inside
 // the data: URI. Reads the `D` object (current config + provider list) that the
@@ -39,9 +40,25 @@ var PAGE_JS = [
   'byId("maxTokens").value=(D.maxTokens==null?"":D.maxTokens);',
   'byId("historyTurns").value=(D.historyTurns==null?6:D.historyTurns);',
   'byId("timeoutSeconds").value=(D.timeoutMs==null?30:Math.round(D.timeoutMs/1000));',
+  // TTS section
+  'var tsel=byId("ttsProvider");',
+  'D.ttsList.forEach(function(p){var o=document.createElement("option");o.value=p.id;o.textContent=p.label;tsel.appendChild(o);});',
+  'var T=D.tts||{};',
+  'byId("ttsEnabled").checked=!!T.enabled;',
+  'if(T.provider)tsel.value=T.provider;',
+  'byId("ttsKey").value=T.key||"";',
+  'byId("ttsVoice").value=T.voice||"";',
+  'byId("ttsModel").value=T.model||"";',
+  'function tdflt(id){var r=null;D.ttsList.forEach(function(x){if(x.id===id)r=x;});return r||{};}',
+  'function tph(){var d=tdflt(tsel.value);byId("ttsVoice").placeholder=d.defaultVoice||"voice";byId("ttsModel").placeholder=d.defaultModel||"(default)";}',
+  'function toggleTts(){byId("ttsBox").style.display=byId("ttsEnabled").checked?"block":"none";}',
+  'byId("ttsEnabled").addEventListener("change",toggleTts);',
+  'tsel.addEventListener("change",tph);',
+  'tph();toggleTts();',
   'byId("save").addEventListener("click",function(){',
   'stash(cur);',
-  'var out={activeProvider:cur,providers:creds,system:byId("system").value,temperature:byId("temperature").value,maxTokens:byId("maxTokens").value,historyTurns:byId("historyTurns").value,timeoutSeconds:byId("timeoutSeconds").value};',
+  'var out={activeProvider:cur,providers:creds,system:byId("system").value,temperature:byId("temperature").value,maxTokens:byId("maxTokens").value,historyTurns:byId("historyTurns").value,timeoutSeconds:byId("timeoutSeconds").value,',
+  'tts:{enabled:byId("ttsEnabled").checked,provider:tsel.value,key:byId("ttsKey").value,voice:byId("ttsVoice").value,model:byId("ttsModel").value}};',
   'document.location="pebblejs://close#"+encodeURIComponent(JSON.stringify(out));',
   '});',
   '})();'
@@ -71,7 +88,9 @@ function buildConfigPage(cfg, models) {
     // Live model list pre-fetched by pkjs for the active provider (CORS blocks
     // fetching from this webview), offered as autocomplete on the model field.
     models: models || [],
-    modelsFor: cfg.activeProvider
+    modelsFor: cfg.activeProvider,
+    ttsList: tts.list(),
+    tts: cfg.tts || {}
   };
 
   return [
@@ -91,6 +110,14 @@ function buildConfigPage(cfg, models) {
     '<label>Max tokens (blank = provider default)</label><input id="maxTokens" type="number" min="1">',
     '<label>History turns</label><input id="historyTurns" type="number" min="0" max="50">',
     '<label>Network timeout (seconds)</label><input id="timeoutSeconds" type="number" min="5" max="120">',
+    '<label style="margin-top:20px"><input type="checkbox" id="ttsEnabled" style="width:auto;margin-right:8px;vertical-align:middle"> Read answers aloud</label>',
+    '<div id="ttsBox" style="display:none">',
+    '<label>TTS service</label><select id="ttsProvider"></select>',
+    '<label>TTS API key</label><input id="ttsKey" type="password" placeholder="blank = reuse chat key (OpenAI/Gemini)">',
+    '<label>Voice</label><input id="ttsVoice" type="text">',
+    '<label>TTS model (optional)</label><input id="ttsModel" type="text">',
+    '<div class="hint">Reads short answers via the speaker. Needs a TTS-capable key (OpenAI, Gemini, or Google Cloud).</div>',
+    '</div>',
     '<button id="save">Save</button>',
     '<script>var D=', JSON.stringify(data), ';</script>',
     '<script>', PAGE_JS, '</script>',

@@ -83,6 +83,14 @@ static char *s_response_buf = NULL;
 static size_t s_response_len = 0;   // bytes used (excluding NUL)
 static size_t s_response_cap = 0;   // bytes allocated
 
+// Audio (read-aloud) streaming: phone sends 8 kHz / 8-bit signed PCM in chunks.
+#define AUDIO_PENDING_MAX 8192
+static uint8_t s_audio_pending[AUDIO_PENDING_MAX];
+static size_t s_audio_pending_len = 0;
+static bool s_audio_open = false;
+static bool s_audio_closing = false;
+static AppTimer *s_audio_timer = NULL;
+
 // ---------------------------------------------------------------------------
 // Persisted state
 // ---------------------------------------------------------------------------
@@ -280,6 +288,74 @@ static void prv_set_state(AppState state) {
 // AppMessage
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Audio playback (read aloud)
+// ---------------------------------------------------------------------------
+
+// Push as much of the pending buffer to the speaker as it will accept.
+static void prv_audio_drain(void) {
+  if (!s_audio_open || s_audio_pending_len == 0) {
+    return;
+  }
+  uint32_t written = speaker_stream_write(s_audio_pending, s_audio_pending_len);
+  if (written > 0) {
+    if (written < s_audio_pending_len) {
+      memmove(s_audio_pending, s_audio_pending + written, s_audio_pending_len - written);
+    }
+    s_audio_pending_len -= written;
+  }
+}
+
+// Periodic tick to keep feeding the speaker as its buffer frees, and to close
+// once the phone signalled the end and everything has drained.
+static void prv_audio_tick(void *ctx) {
+  s_audio_timer = NULL;
+  if (!s_audio_open) {
+    return;
+  }
+  prv_audio_drain();
+  if (s_audio_closing && s_audio_pending_len == 0) {
+    speaker_stream_close();
+    s_audio_open = false;
+    return;
+  }
+  s_audio_timer = app_timer_register(30, prv_audio_tick, NULL);
+}
+
+static void prv_audio_open(void) {
+  if (s_audio_open) {
+    speaker_stream_close();
+    s_audio_open = false;
+  }
+  s_audio_pending_len = 0;
+  s_audio_closing = false;
+  // The phone always sends 8 kHz / 8-bit signed mono (lowest Bluetooth load).
+  s_audio_open = speaker_stream_open(SpeakerPcmFormat_8kHz_8bit, 80);
+  if (s_audio_open && !s_audio_timer) {
+    s_audio_timer = app_timer_register(30, prv_audio_tick, NULL);
+  }
+}
+
+static void prv_audio_chunk(const uint8_t *data, size_t len) {
+  if (!s_audio_open || !data) {
+    return;
+  }
+  prv_audio_drain();   // free space first
+  if (s_audio_pending_len + len > AUDIO_PENDING_MAX) {
+    size_t room = AUDIO_PENDING_MAX - s_audio_pending_len;
+    len = (len > room) ? room : len;   // drop overflow (BT is the bottleneck, rare)
+  }
+  if (len > 0) {
+    memcpy(s_audio_pending + s_audio_pending_len, data, len);
+    s_audio_pending_len += len;
+  }
+  prv_audio_drain();
+}
+
+static void prv_audio_end(void) {
+  s_audio_closing = true;   // the tick drains the tail, then closes
+}
+
 static void prv_send_transcript(const char *text) {
   DictionaryIterator *iter;
   if (app_message_outbox_begin(&iter) != APP_MSG_OK) {
@@ -292,6 +368,17 @@ static void prv_send_transcript(const char *text) {
 }
 
 static void prv_inbox_received(DictionaryIterator *iter, void *context) {
+  // Audio (read-aloud) stream: rate/bits open it, chunks feed it, end closes it.
+  Tuple *arate_t = dict_find(iter, MESSAGE_KEY_audioRate);
+  Tuple *achunk_t = dict_find(iter, MESSAGE_KEY_audioChunk);
+  Tuple *aend_t = dict_find(iter, MESSAGE_KEY_audioEnd);
+  if (arate_t || achunk_t || aend_t) {
+    if (arate_t) { prv_audio_open(); }
+    if (achunk_t) { prv_audio_chunk(achunk_t->value->data, achunk_t->length); }
+    if (aend_t) { prv_audio_end(); }
+    return;
+  }
+
   Tuple *error_t = dict_find(iter, MESSAGE_KEY_error);
   if (error_t) {
     strncpy(s_error_buf, error_t->value->cstring, sizeof(s_error_buf) - 1);
@@ -483,6 +570,14 @@ static void prv_deinit(void) {
   if (s_anim_timer) {
     app_timer_cancel(s_anim_timer);
     s_anim_timer = NULL;
+  }
+  if (s_audio_timer) {
+    app_timer_cancel(s_audio_timer);
+    s_audio_timer = NULL;
+  }
+  if (s_audio_open) {
+    speaker_stream_close();
+    s_audio_open = false;
   }
 #if defined(PBL_MICROPHONE)
   if (s_dictation_session) {

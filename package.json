@@ -29,7 +29,11 @@
       "response",
       "chunkIndex",
       "chunkTotal",
-      "error"
+      "error",
+      "audioRate",
+      "audioBits",
+      "audioChunk",
+      "audioEnd"
     ],
     "resources": {
       "media": [

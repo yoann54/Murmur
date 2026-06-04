@@ -25,6 +25,8 @@ var Conversation = require('./chat');
 var splitUtf8 = require('./chunk').splitUtf8;
 var formatForWatch = require('./markdown').formatForWatch;
 var buildConfigPage = require('./config_page');
+var tts = require('./tts');
+var audioPcm = require('./audio');
 
 var STATUS_IDLE = 0;
 var STATUS_THINKING = 1;
@@ -54,7 +56,7 @@ function sendError(message) {
   send({ error: String(message), status: STATUS_ERROR });
 }
 
-function sendResponse(text) {
+function sendResponse(text, onDone) {
   // Light Markdown formatting for the watch (history keeps the raw text).
   var chunks = splitUtf8(formatForWatch(text), CHUNK_BYTES);
   var total = chunks.length;
@@ -62,6 +64,7 @@ function sendResponse(text) {
   function sendChunk(index, attempt) {
     if (index >= total) {
       sendStatus(STATUS_IDLE);
+      if (onDone) { onDone(); }
       return;
     }
     Pebble.sendAppMessage(
@@ -79,6 +82,76 @@ function sendResponse(text) {
   }
 
   sendChunk(0, 0);
+}
+
+// ---- Read aloud (TTS) ------------------------------------------------------
+// The PCM is streamed AFTER the text is sent, so it doesn't collide with the
+// text on the single AppMessage outbox.
+
+var AUDIO_CHUNK_BYTES = 1024;
+
+function sendAudio(bytes, rate, bits) {
+  var total = bytes.length;
+  var pos = 0;
+
+  function sendNext(first, attempt) {
+    if (pos >= total) {
+      send({ audioEnd: 1 });
+      return;
+    }
+    var slice = bytes.slice(pos, pos + AUDIO_CHUNK_BYTES);
+    var msg = { audioChunk: slice };
+    if (first) { msg.audioRate = rate; msg.audioBits = bits; }
+    Pebble.sendAppMessage(msg,
+      function () { pos += slice.length; sendNext(false, 0); },
+      function (e) {
+        if (attempt < MAX_SEND_RETRIES) {
+          sendNext(first, attempt + 1);
+        } else {
+          console.log('audio chunk failed at ' + pos + ': ' + (e && e.error && e.error.message));
+        }
+      }
+    );
+  }
+
+  sendNext(true, 0);
+}
+
+function maybeSpeak(text) {
+  var cfg = config.load();
+  var t = cfg.tts;
+  if (!t || !t.enabled) { return; }
+
+  var provider = tts.get(t.provider);
+  if (!provider) { console.log('TTS: unknown provider ' + t.provider); return; }
+
+  // Use the dedicated TTS key, or fall back to the active chat provider's key.
+  var apiKey = t.key;
+  if (!apiKey) {
+    var pc = config.providerConfig(cfg, cfg.activeProvider, providers.get(cfg.activeProvider));
+    apiKey = pc && pc.apiKey;
+  }
+  if (!apiKey) { console.log('TTS: no API key'); return; }
+
+  // Plain-ish text for speech; cap length (Bluetooth bandwidth).
+  var spoken = formatForWatch(text).replace(/^•\s/gm, '');
+  var max = t.maxChars || 600;
+  if (spoken.length > max) { spoken = spoken.slice(0, max); }
+
+  var rq = provider.buildRequest({
+    apiKey: apiKey, model: t.model, voice: t.voice, text: spoken, baseUrl: t.baseUrl
+  });
+  net.request({
+    url: rq.url, method: rq.method, headers: rq.headers, body: rq.body,
+    responseType: rq.responseType, timeoutMs: 30000
+  }, function (err, res) {
+    if (err) { console.log('TTS net error: ' + err.message); return; }
+    var pcm = provider.extractPcm(res.status, res);
+    if (pcm.error) { console.log('TTS: ' + pcm.error); return; }
+    var watch = audioPcm.toWatchPcm(pcm.samples, pcm.srcRate);
+    console.log('TTS: streaming ' + watch.bytes.length + ' bytes @ ' + watch.rate + 'Hz/' + watch.bits + 'bit');
+    sendAudio(watch.bytes, watch.rate, watch.bits);
+  });
 }
 
 function handleTranscript(text) {
@@ -142,7 +215,8 @@ function handleTranscript(text) {
       return sendError(parsed.error);
     }
     convo.addAssistant(parsed.text);   // record the pair (PebbleAI bug #4)
-    sendResponse(parsed.text);
+    var reply = parsed.text;
+    sendResponse(reply, function () { maybeSpeak(reply); });
   });
 }
 
@@ -180,6 +254,19 @@ function applyConfigPage(s) {
   cfg.historyTurns = isNaN(turns) ? 6 : turns;
   var secs = parseInt(s.timeoutSeconds, 10);
   cfg.timeoutMs = (isNaN(secs) ? 30 : secs) * 1000;
+
+  if (s.tts && typeof s.tts === 'object') {
+    var prev = cfg.tts || {};
+    cfg.tts = {
+      enabled: !!s.tts.enabled,
+      provider: s.tts.provider || prev.provider || 'openai_tts',
+      key: s.tts.key || '',
+      model: s.tts.model || '',
+      voice: s.tts.voice || '',
+      baseUrl: s.tts.baseUrl || '',
+      maxChars: prev.maxChars || 600
+    };
+  }
 
   config.save(cfg);
   if (convo) { convo.maxTurns = cfg.historyTurns; }

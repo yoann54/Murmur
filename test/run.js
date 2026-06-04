@@ -266,4 +266,73 @@ test('leaves ordinary prose alone (no over-stripping)', function () {
   assert.strictEqual(formatForWatch('Plain answer, no markdown.'), 'Plain answer, no markdown.');
 });
 
+console.log('audio: base64 + PCM downsampling for the watch');
+
+var audio = require('../src/pkjs/audio');
+
+test('base64ToBytes decodes correctly', function () {
+  assert.deepStrictEqual(audio.base64ToBytes('AAEC'), [0, 1, 2]);
+  assert.deepStrictEqual(audio.base64ToBytes('AAE='), [0, 1]);
+});
+
+test('bytesToInt16 reads little-endian signed', function () {
+  assert.deepStrictEqual(audio.bytesToInt16([0x00, 0x01]), [256]);
+  assert.deepStrictEqual(audio.bytesToInt16([0xFF, 0xFF]), [-1]);
+  assert.deepStrictEqual(audio.bytesToInt16([0x00, 0x80]), [-32768]);
+});
+
+test('decimate keeps every Nth sample', function () {
+  assert.deepStrictEqual(audio.decimate([1, 2, 3, 4, 5, 6, 7], 3), [1, 4, 7]);
+});
+
+test('toWatchPcm: 24kHz->8kHz, 16->8bit, as 0..255 bytes', function () {
+  var r = audio.toWatchPcm([0x0100, 0x0200, 0x0300], 24000); // factor 3 -> keep first
+  assert.strictEqual(r.rate, 8000);
+  assert.strictEqual(r.bits, 8);
+  assert.deepStrictEqual(r.bytes, [1]);  // 0x0100 >> 8 = 1
+  var neg = audio.toWatchPcm([-256], 8000); // factor 1
+  assert.deepStrictEqual(neg.bytes, [0xFF]); // -256>>8 = -1 -> 0xFF byte
+});
+
+console.log('tts: provider registry');
+
+var tts = require('../src/pkjs/tts');
+
+test('openai TTS request is /v1/audio/speech with pcm + arraybuffer', function () {
+  var r = tts.get('openai_tts').buildRequest({ apiKey: 'k', text: 'hi' });
+  assert.ok(/\/v1\/audio\/speech$/.test(r.url));
+  assert.strictEqual(r.responseType, 'arraybuffer');
+  var b = JSON.parse(r.body);
+  assert.strictEqual(b.response_format, 'pcm');
+  assert.strictEqual(b.input, 'hi');
+});
+
+test('gemini TTS request asks for AUDIO modality', function () {
+  var r = tts.get('gemini_tts').buildRequest({ apiKey: 'AIza', text: 'salut', voice: 'Kore' });
+  assert.ok(r.url.indexOf(':generateContent?key=AIza') !== -1);
+  var b = JSON.parse(r.body);
+  assert.deepStrictEqual(b.generationConfig.responseModalities, ['AUDIO']);
+});
+
+test('gemini TTS extracts PCM + sample rate from inlineData', function () {
+  var res = { status: 200, body: JSON.stringify({
+    candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;rate=24000', data: 'AAE=' } }] } }]
+  }) };
+  var out = tts.get('gemini_tts').extractPcm(200, res);
+  assert.deepStrictEqual(out.samples, [256]);
+  assert.strictEqual(out.srcRate, 24000);
+});
+
+test('google TTS derives languageCode from the voice name', function () {
+  var r = tts.get('google_tts').buildRequest({ apiKey: 'k', text: 'bonjour', voice: 'fr-FR-Standard-A' });
+  assert.ok(/text:synthesize/.test(r.url));
+  var b = JSON.parse(r.body);
+  assert.strictEqual(b.voice.languageCode, 'fr-FR');
+  assert.strictEqual(b.audioConfig.sampleRateHertz, 8000);
+});
+
+test('tts registry lists the three providers', function () {
+  assert.deepStrictEqual(tts.ids().sort(), ['gemini_tts', 'google_tts', 'openai_tts'].sort());
+});
+
 console.log('\nAll ' + passed + ' tests passed.');

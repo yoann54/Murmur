@@ -45,11 +45,24 @@ function request(opts, callback) {
     xhr.setRequestHeader(name, headers[name]);
   });
 
+  if (opts.responseType) {
+    try { xhr.responseType = opts.responseType; } catch (e) {}
+  }
+
   xhr.timeout = timeoutMs;
   xhr.ontimeout = function () { finish(new Error('Network timeout')); };
   xhr.onerror = function () { finish(new Error('Network error')); };
   xhr.onload = function () {
-    finish(null, { status: xhr.status, body: xhr.responseText });
+    var res = { status: xhr.status };
+    if (opts.responseType === 'arraybuffer' && xhr.response) {
+      var u8 = new Uint8Array(xhr.response);
+      var arr = new Array(u8.length);
+      for (var i = 0; i < u8.length; i++) { arr[i] = u8[i]; }
+      res.bytes = arr;
+    } else {
+      res.body = xhr.responseText;
+    }
+    finish(null, res);
   };
 
   try {
