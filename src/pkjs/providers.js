@@ -25,6 +25,29 @@ function trimSlashes(url) {
   return (url || '').replace(/\/+$/, '');
 }
 
+/*
+ * Resolve the chat-completions endpoint from a base URL. Most providers want
+ * "<base>/v1/chat/completions", but some OpenAI-compatible servers (e.g.
+ * OpenWebUI at "<host>/api/chat/completions") use a different path. So if the
+ * user already gave the full endpoint, use it verbatim; if they gave a ".../vN"
+ * base, just add "/chat/completions"; otherwise default to "/v1/chat/completions".
+ */
+function chatCompletionsUrl(base) {
+  base = trimSlashes(base);
+  if (/\/chat\/completions$/.test(base)) { return base; }
+  if (/\/completions$/.test(base)) { return base; }
+  if (/\/v\d+$/.test(base)) { return base + '/chat/completions'; }
+  return base + '/v1/chat/completions';
+}
+
+/* The matching models endpoint for the same base URL. */
+function modelsUrl(base) {
+  base = trimSlashes(base);
+  if (/\/chat\/completions$/.test(base)) { return base.replace(/\/chat\/completions$/, '/models'); }
+  if (/\/v\d+$/.test(base)) { return base + '/models'; }
+  return base + '/v1/models';
+}
+
 /* OpenAI Chat Completions shape, shared by OpenAI / DeepSeek / Grok / custom. */
 function openAICompatible(spec) {
   return {
@@ -49,7 +72,7 @@ function openAICompatible(spec) {
       if (req.maxTokens !== undefined) { body.max_tokens = req.maxTokens; }
 
       return {
-        url: base + '/v1/chat/completions',
+        url: chatCompletionsUrl(req.baseUrl || spec.defaultBaseUrl),
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -74,9 +97,8 @@ function openAICompatible(spec) {
     /* Fetch a live model list so the config page can offer a current dropdown
      * instead of a hardcoded one. Free-text entry stays the fallback. */
     listModels: function (req) {
-      var base = trimSlashes(req.baseUrl || spec.defaultBaseUrl);
       return {
-        url: base + '/v1/models',
+        url: modelsUrl(req.baseUrl || spec.defaultBaseUrl),
         method: 'GET',
         headers: { 'Authorization': 'Bearer ' + req.apiKey }
       };

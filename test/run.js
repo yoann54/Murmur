@@ -116,6 +116,30 @@ test('parseModels tolerates garbage', function () {
   assert.deepStrictEqual(providers.get('gemini').parseModels(null), []);
 });
 
+test('custom base URL: full endpoint used verbatim (OpenWebUI), else /v1 added', function () {
+  var p = providers.get('openai_compatible');
+  // Full endpoint given (e.g. OpenWebUI /api/chat/completions) -> verbatim
+  var r1 = p.buildRequest({ apiKey: 'k', model: 'm', baseUrl: 'https://owui.example.com/api/chat/completions', messages: [{ role: 'user', content: 'hi' }] });
+  assert.strictEqual(r1.url, 'https://owui.example.com/api/chat/completions');
+  // A ".../v1" base -> add /chat/completions
+  var r2 = p.buildRequest({ apiKey: 'k', model: 'm', baseUrl: 'https://host/openai/v1', messages: [{ role: 'user', content: 'hi' }] });
+  assert.strictEqual(r2.url, 'https://host/openai/v1/chat/completions');
+  // A bare domain -> default OpenAI path (no regression)
+  var r3 = p.buildRequest({ apiKey: 'k', model: 'm', baseUrl: 'https://host', messages: [{ role: 'user', content: 'hi' }] });
+  assert.strictEqual(r3.url, 'https://host/v1/chat/completions');
+});
+
+test('standard providers still hit /v1/chat/completions', function () {
+  var r = providers.get('openai').buildRequest({ apiKey: 'k', model: 'm', messages: [{ role: 'user', content: 'hi' }] });
+  assert.strictEqual(r.url, 'https://api.openai.com/v1/chat/completions');
+});
+
+test('models URL follows the same base (OpenWebUI -> /api/models)', function () {
+  var p = providers.get('openai_compatible');
+  assert.strictEqual(p.listModels({ apiKey: 'k', baseUrl: 'https://owui.example.com/api/chat/completions' }).url, 'https://owui.example.com/api/models');
+  assert.strictEqual(p.listModels({ apiKey: 'k', baseUrl: 'https://host' }).url, 'https://host/v1/models');
+});
+
 test('registry lists the expected providers', function () {
   var ids = providers.ids().sort();
   assert.deepStrictEqual(ids, ['anthropic', 'deepseek', 'gemini', 'grok', 'mistral', 'openai', 'openai_compatible'].sort());
