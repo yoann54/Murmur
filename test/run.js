@@ -244,6 +244,12 @@ test('builds an HTML page embedding providers and the close mechanism', function
   });
 });
 
+test('includes the PayPal support button', function () {
+  var html = buildConfigPage(config.defaults());
+  assert.ok(html.indexOf('https://paypal.me/yoadadev') !== -1, 'has the PayPal link');
+  assert.ok(html.indexOf('Support the developer') !== -1, 'has the support label');
+});
+
 test('page is far smaller than Clay (the reason we dropped Clay)', function () {
   var html = buildConfigPage(config.defaults());
   var url = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);

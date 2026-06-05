@@ -55,7 +55,8 @@ var STYLE = [
   'input,select,textarea{width:100%;box-sizing:border-box;padding:11px;border-radius:9px;border:1px solid #333;background:#111;color:#fff;font-size:16px}',
   'textarea{min-height:64px;resize:vertical}',
   '.hint{color:#777;font-size:11px;margin-top:4px}',
-  'button{width:100%;margin-top:24px;margin-bottom:24px;padding:15px;border:0;border-radius:11px;background:#00aaff;color:#000;font-size:17px;font-weight:bold}'
+  'button{width:100%;margin-top:24px;margin-bottom:18px;padding:15px;border:0;border-radius:11px;background:#00aaff;color:#000;font-size:17px;font-weight:bold}',
+  '.support{display:block;text-align:center;text-decoration:none;background:#0070ba;color:#fff;padding:13px;border-radius:11px;margin-bottom:24px;font-size:15px;font-weight:bold}'
 ].join('');
 
 function buildConfigPage(cfg, models) {
@@ -92,6 +93,7 @@ function buildConfigPage(cfg, models) {
     '<label>History turns</label><input id="historyTurns" type="number" min="0" max="50">',
     '<label>Network timeout (seconds)</label><input id="timeoutSeconds" type="number" min="5" max="120">',
     '<button id="save">Save</button>',
+    '<a href="https://paypal.me/yoadadev" target="_blank" rel="noopener" class="support">☕ Support the developer</a>',
     '<script>var D=', JSON.stringify(data), ';</script>',
     '<script>', PAGE_JS, '</script>',
     '</body></html>'
