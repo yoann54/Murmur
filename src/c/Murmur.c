@@ -84,11 +84,16 @@ static size_t s_response_len = 0;   // bytes used (excluding NUL)
 static size_t s_response_cap = 0;   // bytes allocated
 
 // Audio (read-aloud) streaming: phone sends 8 kHz / 8-bit signed PCM in chunks.
-#define AUDIO_PENDING_MAX 8192
+// We accumulate a jitter buffer and only start feeding the speaker once it holds
+// AUDIO_PREBUFFER bytes (~0.5 s at 8 kHz), so the slow Bluetooth feed can't
+// underrun the speaker mid-playback (which is what makes it crackle).
+#define AUDIO_PENDING_MAX 16384
+#define AUDIO_PREBUFFER 4096
 static uint8_t s_audio_pending[AUDIO_PENDING_MAX];
 static size_t s_audio_pending_len = 0;
 static bool s_audio_open = false;
 static bool s_audio_closing = false;
+static bool s_audio_started = false;   // playback begun (prebuffer filled)?
 static AppTimer *s_audio_timer = NULL;
 
 // ---------------------------------------------------------------------------
@@ -297,6 +302,11 @@ static void prv_audio_drain(void) {
   if (!s_audio_open || s_audio_pending_len == 0) {
     return;
   }
+  // Hold back until the jitter buffer is primed (unless the stream is ending).
+  if (!s_audio_started && s_audio_pending_len < AUDIO_PREBUFFER && !s_audio_closing) {
+    return;
+  }
+  s_audio_started = true;
   uint32_t written = speaker_stream_write(s_audio_pending, s_audio_pending_len);
   if (written > 0) {
     if (written < s_audio_pending_len) {
@@ -329,6 +339,7 @@ static void prv_audio_open(void) {
   }
   s_audio_pending_len = 0;
   s_audio_closing = false;
+  s_audio_started = false;
   // The phone always sends 8 kHz / 8-bit signed mono (lowest Bluetooth load).
   s_audio_open = speaker_stream_open(SpeakerPcmFormat_8kHz_8bit, 80);
   if (s_audio_open && !s_audio_timer) {
@@ -551,7 +562,7 @@ static void prv_init(void) {
   app_message_register_outbox_failed(prv_outbox_failed);
   // Inbox sized well above CHUNK_BYTES (1000) in the JS sender; generous outbox
   // for long dictated transcripts.
-  app_message_open(4096, 2048);
+  app_message_open(8192, 2048);
 
 #if defined(PBL_MICROPHONE)
   s_dictation_session = dictation_session_create(0, prv_dictation_callback, NULL);

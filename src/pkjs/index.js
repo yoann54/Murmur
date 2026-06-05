@@ -88,7 +88,7 @@ function sendResponse(text, onDone) {
 // The PCM is streamed AFTER the text is sent, so it doesn't collide with the
 // text on the single AppMessage outbox.
 
-var AUDIO_CHUNK_BYTES = 1024;
+var AUDIO_CHUNK_BYTES = 3072;  // bigger chunks = fewer acks = higher BT throughput
 
 function sendAudio(bytes, rate, bits) {
   var total = bytes.length;
@@ -117,13 +117,16 @@ function sendAudio(bytes, rate, bits) {
   sendNext(true, 0);
 }
 
-function maybeSpeak(text) {
+// Synthesise speech for `text` and call cb({bytes,rate,bits}) when ready, or
+// cb(null) if TTS is off / unavailable / failed. Run in parallel with the text
+// send so synthesis overlaps the (slow) text transfer instead of following it.
+function fetchTts(text, cb) {
   var cfg = config.load();
   var t = cfg.tts;
-  if (!t || !t.enabled) { return; }
+  if (!t || !t.enabled) { return cb(null); }
 
   var provider = tts.get(t.provider);
-  if (!provider) { console.log('TTS: unknown provider ' + t.provider); return; }
+  if (!provider) { console.log('TTS: unknown provider ' + t.provider); return cb(null); }
 
   // Use the dedicated TTS key, or fall back to the active chat provider's key.
   var apiKey = t.key;
@@ -131,7 +134,7 @@ function maybeSpeak(text) {
     var pc = config.providerConfig(cfg, cfg.activeProvider, providers.get(cfg.activeProvider));
     apiKey = pc && pc.apiKey;
   }
-  if (!apiKey) { console.log('TTS: no API key'); return; }
+  if (!apiKey) { console.log('TTS: no API key'); return cb(null); }
 
   // Plain-ish text for speech; cap length (Bluetooth bandwidth).
   var spoken = formatForWatch(text).replace(/^•\s/gm, '');
@@ -145,12 +148,12 @@ function maybeSpeak(text) {
     url: rq.url, method: rq.method, headers: rq.headers, body: rq.body,
     responseType: rq.responseType, timeoutMs: 30000
   }, function (err, res) {
-    if (err) { console.log('TTS net error: ' + err.message); return; }
+    if (err) { console.log('TTS net error: ' + err.message); return cb(null); }
     var pcm = provider.extractPcm(res.status, res);
-    if (pcm.error) { console.log('TTS: ' + pcm.error); return; }
+    if (pcm.error) { console.log('TTS: ' + pcm.error); return cb(null); }
     var watch = audioPcm.toWatchPcm(pcm.samples, pcm.srcRate);
-    console.log('TTS: streaming ' + watch.bytes.length + ' bytes @ ' + watch.rate + 'Hz/' + watch.bits + 'bit');
-    sendAudio(watch.bytes, watch.rate, watch.bits);
+    console.log('TTS: ready ' + watch.bytes.length + ' bytes @ ' + watch.rate + 'Hz/' + watch.bits + 'bit');
+    cb(watch);
   });
 }
 
@@ -216,7 +219,17 @@ function handleTranscript(text) {
     }
     convo.addAssistant(parsed.text);   // record the pair (PebbleAI bug #4)
     var reply = parsed.text;
-    sendResponse(reply, function () { maybeSpeak(reply); });
+    // Start TTS synthesis now (parallel with the text send); play once the text
+    // is fully sent (shared outbox) AND the audio is ready.
+    var st = { textDone: false, audio: null };
+    function maybePlay() {
+      if (st.textDone && st.audio) {
+        console.log('TTS: streaming ' + st.audio.bytes.length + ' bytes');
+        sendAudio(st.audio.bytes, st.audio.rate, st.audio.bits);
+      }
+    }
+    fetchTts(reply, function (audio) { st.audio = audio; maybePlay(); });
+    sendResponse(reply, function () { st.textDone = true; maybePlay(); });
   });
 }
 
