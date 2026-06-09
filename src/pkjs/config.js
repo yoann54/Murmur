@@ -38,7 +38,9 @@ function defaults() {
     temperature: undefined,
     maxTokens: undefined,
     historyTurns: 6,
-    timeoutMs: 30000
+    timeoutMs: 30000,
+    autoScroll: false,    // auto-scroll the reply on the watch
+    scrollSpeed: 2        // 1 slow / 2 medium / 3 fast
   };
 }
 

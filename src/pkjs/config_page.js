@@ -39,9 +39,11 @@ var PAGE_JS = [
   'byId("maxTokens").value=(D.maxTokens==null?"":D.maxTokens);',
   'byId("historyTurns").value=(D.historyTurns==null?6:D.historyTurns);',
   'byId("timeoutSeconds").value=(D.timeoutMs==null?30:Math.round(D.timeoutMs/1000));',
+  'byId("autoScroll").checked=!!D.autoScroll;',
+  'byId("scrollSpeed").value=String(D.scrollSpeed||2);',
   'byId("save").addEventListener("click",function(){',
   'stash(cur);',
-  'var out={activeProvider:cur,providers:creds,system:byId("system").value,temperature:byId("temperature").value,maxTokens:byId("maxTokens").value,historyTurns:byId("historyTurns").value,timeoutSeconds:byId("timeoutSeconds").value};',
+  'var out={activeProvider:cur,providers:creds,system:byId("system").value,temperature:byId("temperature").value,maxTokens:byId("maxTokens").value,historyTurns:byId("historyTurns").value,timeoutSeconds:byId("timeoutSeconds").value,autoScroll:byId("autoScroll").checked,scrollSpeed:parseInt(byId("scrollSpeed").value,10)};',
   'document.location="pebblejs://close#"+encodeURIComponent(JSON.stringify(out));',
   '});',
   '})();'
@@ -68,6 +70,8 @@ function buildConfigPage(cfg, models) {
     maxTokens: cfg.maxTokens,
     historyTurns: cfg.historyTurns,
     timeoutMs: cfg.timeoutMs,
+    autoScroll: cfg.autoScroll,
+    scrollSpeed: cfg.scrollSpeed,
     list: providers.list(),
     // Live model list pre-fetched by pkjs for the active provider (CORS blocks
     // fetching from this webview), offered as autocomplete on the model field.
@@ -92,6 +96,9 @@ function buildConfigPage(cfg, models) {
     '<label>Max tokens (blank = provider default)</label><input id="maxTokens" type="number" min="1">',
     '<label>History turns</label><input id="historyTurns" type="number" min="0" max="50">',
     '<label>Network timeout (seconds)</label><input id="timeoutSeconds" type="number" min="5" max="120">',
+    '<label style="margin-top:18px"><input type="checkbox" id="autoScroll" style="width:auto;margin-right:8px;vertical-align:middle"> Auto-scroll answers</label>',
+    '<select id="scrollSpeed"><option value="1">Slow</option><option value="2">Medium</option><option value="3">Fast</option></select>',
+    '<div class="hint">The reply scrolls by itself at reading speed; UP/DOWN pause it.</div>',
     '<button id="save">Save</button>',
     '<a href="https://paypal.me/yoadadev" target="_blank" rel="noopener" class="support">☕ Support the developer</a>',
     '<script>var D=', JSON.stringify(data), ';</script>',

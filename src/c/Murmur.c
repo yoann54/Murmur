@@ -60,6 +60,8 @@ typedef enum {
 // can migrate instead of corrupting (the lesson from PebbleAI's unversioned
 // Settings struct). v1 holds nothing actionable yet — it establishes the ladder.
 #define PERSIST_KEY_STATE 1
+#define PERSIST_KEY_AUTOSCROLL 2
+#define PERSIST_KEY_SCROLLSPEED 3
 #define PERSIST_SCHEMA_VERSION 1
 
 typedef struct {
@@ -76,6 +78,11 @@ static DictationSession *s_dictation_session;
 static AppState s_state = STATE_IDLE;
 static AppTimer *s_anim_timer = NULL;
 static int s_anim_phase = 0;
+
+// Auto-scroll (configurable from the phone). speed = px advanced per 100 ms tick.
+static AppTimer *s_scroll_timer = NULL;
+static bool s_autoscroll = false;
+static int s_scroll_speed = 2;
 
 static char s_error_buf[128];
 
@@ -262,6 +269,35 @@ static void prv_start_anim(void) {
   }
 }
 
+// Auto-scroll the reply at reading speed (configurable). Runs while a response
+// is shown and auto-scroll is on; manual UP/DOWN pause it (prv_scroll_stop).
+static void prv_scroll_stop(void) {
+  if (s_scroll_timer) { app_timer_cancel(s_scroll_timer); s_scroll_timer = NULL; }
+}
+
+static void prv_scroll_tick(void *ctx) {
+  s_scroll_timer = NULL;
+  if (!s_autoscroll || s_state != STATE_RESPONSE) { return; }
+  GRect fb = layer_get_bounds(scroll_layer_get_layer(s_scroll_layer));
+  GSize cs = scroll_layer_get_content_size(s_scroll_layer);
+  int max_y = cs.h - fb.size.h;          // how far down we can scroll
+  if (max_y < 0) { max_y = 0; }
+  GPoint o = scroll_layer_get_content_offset(s_scroll_layer);
+  if (-o.y < max_y) {
+    int step = (s_scroll_speed < 1) ? 1 : (s_scroll_speed > 4 ? 4 : s_scroll_speed);
+    o.y -= step;
+    if (-o.y > max_y) { o.y = -max_y; }
+    scroll_layer_set_content_offset(s_scroll_layer, o, false);
+  }
+  s_scroll_timer = app_timer_register(100, prv_scroll_tick, NULL);  // keep following growth
+}
+
+static void prv_scroll_start(void) {
+  if (s_autoscroll && s_state == STATE_RESPONSE && !s_scroll_timer) {
+    s_scroll_timer = app_timer_register(1200, prv_scroll_tick, NULL);  // initial read delay
+  }
+}
+
 static void prv_set_state(AppState state) {
   s_state = state;
   bool show_response = (state == STATE_RESPONSE);
@@ -271,6 +307,7 @@ static void prv_set_state(AppState state) {
   if (state == STATE_LISTENING || state == STATE_THINKING) {
     prv_start_anim();
   }
+  if (show_response) { prv_scroll_start(); } else { prv_scroll_stop(); }
   if (!show_response) {
     layer_mark_dirty(s_voice_layer);
   }
@@ -292,6 +329,16 @@ static void prv_send_transcript(const char *text) {
 }
 
 static void prv_inbox_received(DictionaryIterator *iter, void *context) {
+  // Settings pushed from the phone (auto-scroll on/off + speed).
+  Tuple *as_t = dict_find(iter, MESSAGE_KEY_autoScroll);
+  Tuple *ss_t = dict_find(iter, MESSAGE_KEY_scrollSpeed);
+  if (as_t || ss_t) {
+    if (as_t) { s_autoscroll = as_t->value->int32 ? true : false; persist_write_int(PERSIST_KEY_AUTOSCROLL, s_autoscroll); }
+    if (ss_t) { s_scroll_speed = ss_t->value->int32; persist_write_int(PERSIST_KEY_SCROLLSPEED, s_scroll_speed); }
+    if (s_state == STATE_RESPONSE) { if (s_autoscroll) { prv_scroll_start(); } else { prv_scroll_stop(); } }
+    return;
+  }
+
   Tuple *error_t = dict_find(iter, MESSAGE_KEY_error);
   if (error_t) {
     strncpy(s_error_buf, error_t->value->cstring, sizeof(s_error_buf) - 1);
@@ -310,6 +357,7 @@ static void prv_inbox_received(DictionaryIterator *iter, void *context) {
     if (index == 0) {
       prv_reset_response();
       prv_set_state(STATE_RESPONSE);
+      vibes_short_pulse();   // the reply has arrived
     }
     prv_append_response(response_t->value->cstring);
     prv_layout_response();
@@ -384,6 +432,7 @@ static void prv_select_click_handler(ClickRecognizerRef recognizer, void *contex
 // the window's click config and kill SELECT (dictation).
 static void prv_up_click_handler(ClickRecognizerRef recognizer, void *context) {
   if (s_state != STATE_RESPONSE) { return; }
+  prv_scroll_stop();   // taking manual control pauses auto-scroll
   GPoint o = scroll_layer_get_content_offset(s_scroll_layer);
   o.y += 60;
   if (o.y > 0) { o.y = 0; }
@@ -392,6 +441,7 @@ static void prv_up_click_handler(ClickRecognizerRef recognizer, void *context) {
 
 static void prv_down_click_handler(ClickRecognizerRef recognizer, void *context) {
   if (s_state != STATE_RESPONSE) { return; }
+  prv_scroll_stop();
   GPoint o = scroll_layer_get_content_offset(s_scroll_layer);
   o.y -= 60;  // ScrollLayer clamps to the content size
   scroll_layer_set_content_offset(s_scroll_layer, o, true);
@@ -458,6 +508,8 @@ static void prv_window_unload(Window *window) {
 
 static void prv_init(void) {
   prv_load_state();
+  if (persist_exists(PERSIST_KEY_AUTOSCROLL)) { s_autoscroll = persist_read_int(PERSIST_KEY_AUTOSCROLL); }
+  if (persist_exists(PERSIST_KEY_SCROLLSPEED)) { s_scroll_speed = persist_read_int(PERSIST_KEY_SCROLLSPEED); }
 
   app_message_register_inbox_received(prv_inbox_received);
   app_message_register_inbox_dropped(prv_inbox_dropped);
@@ -484,6 +536,7 @@ static void prv_deinit(void) {
     app_timer_cancel(s_anim_timer);
     s_anim_timer = NULL;
   }
+  prv_scroll_stop();
 #if defined(PBL_MICROPHONE)
   if (s_dictation_session) {
     dictation_session_destroy(s_dictation_session);

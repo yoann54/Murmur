@@ -1,7 +1,7 @@
 {
   "name": "Murmur",
   "author": "yoann piconcely",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "keywords": [
     "pebble-app"
   ],
@@ -29,7 +29,9 @@
       "response",
       "chunkIndex",
       "chunkTotal",
-      "error"
+      "error",
+      "autoScroll",
+      "scrollSpeed"
     ],
     "resources": {
       "media": [

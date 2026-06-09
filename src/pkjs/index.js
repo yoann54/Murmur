@@ -167,6 +167,15 @@ function optionalNumber(v) {
   return isNaN(n) ? undefined : n;
 }
 
+// Push the watch-side display settings (auto-scroll) to the watch. Safe to call
+// at 'ready' or after a config change — never while a reply is streaming.
+function sendSettings(cfg) {
+  send({
+    autoScroll: cfg.autoScroll ? 1 : 0,
+    scrollSpeed: cfg.scrollSpeed || 2
+  });
+}
+
 function applyConfigPage(s) {
   var cfg = config.load();
   cfg.activeProvider = s.activeProvider || cfg.activeProvider;
@@ -180,9 +189,13 @@ function applyConfigPage(s) {
   cfg.historyTurns = isNaN(turns) ? 6 : turns;
   var secs = parseInt(s.timeoutSeconds, 10);
   cfg.timeoutMs = (isNaN(secs) ? 30 : secs) * 1000;
+  cfg.autoScroll = !!s.autoScroll;
+  var sp = parseInt(s.scrollSpeed, 10);
+  cfg.scrollSpeed = isNaN(sp) ? 2 : sp;
 
   config.save(cfg);
   if (convo) { convo.maxTurns = cfg.historyTurns; }
+  sendSettings(cfg);
 }
 
 function openConfig(cfg, models) {
@@ -240,8 +253,10 @@ Pebble.addEventListener('webviewclosed', function (e) {
 
 Pebble.addEventListener('ready', function () {
   // Touch config once so a first-run / migrated blob is persisted.
-  config.save(config.load());
+  var cfg = config.load();
+  config.save(cfg);
   sendStatus(STATUS_IDLE);
+  sendSettings(cfg);   // sync display settings to the watch at startup
   console.log('Murmur JS ready');
 });
 
